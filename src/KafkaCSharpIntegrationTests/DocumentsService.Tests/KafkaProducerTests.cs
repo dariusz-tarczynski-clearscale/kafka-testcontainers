@@ -10,7 +10,6 @@ using CloudNative.CloudEvents;
 using CloudNative.CloudEvents.Kafka;
 using CloudNative.CloudEvents.SystemTextJson;
 using Confluent.Kafka;
-using DocumentsService.Converters;
 using DocumentsService.Tests.Setup;
 using FluentAssertions;
 using LEGO.AsyncAPI.Readers;
