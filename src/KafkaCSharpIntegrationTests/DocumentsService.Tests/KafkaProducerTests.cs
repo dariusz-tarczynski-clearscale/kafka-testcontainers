@@ -1,10 +1,7 @@
 ﻿using System;
 using System.IO;
 using System.Linq;
-using System.Net.Http;
-using System.Net.Mime;
 using System.Reflection;
-using System.Text;
 using System.Threading.Tasks;
 using CloudNative.CloudEvents;
 using CloudNative.CloudEvents.Kafka;
@@ -13,7 +10,6 @@ using Confluent.Kafka;
 using DocumentsService.Tests.Setup;
 using FluentAssertions;
 using LEGO.AsyncAPI.Readers;
-using Newtonsoft.Json;
 using Xunit;
 using JsonSerializer = System.Text.Json.JsonSerializer;
 
