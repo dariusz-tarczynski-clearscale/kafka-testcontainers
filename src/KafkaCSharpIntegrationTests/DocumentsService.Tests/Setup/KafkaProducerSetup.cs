@@ -11,7 +11,7 @@ public class KafkaProducerSetup : ICustomization
 
         var config = new ProducerConfig { BootstrapServers = kafkaConfig.BootstrapServers };
 
-        var producer = new ProducerBuilder<Null, string>(config).Build();
+        var producer = new ProducerBuilder<string, byte[]>(config).Build();
 
         fixture.Inject(producer);
     }

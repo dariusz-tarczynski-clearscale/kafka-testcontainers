@@ -5,11 +5,11 @@
     "version": "0.1.0"
   },
   "channels": {
-    "userSignup": {
-      "address": "user/signedup",
+    "createOrder": {
+      "address": "order/new",
       "messages": {
-        "userSignedupMessage": {
-          "description": "A message describing that a user just signed up.",
+        "newOrderMessage": {
+          "description": "Test message description.",
           "payload": {
             "type": "object",
             "additionalProperties": false,
@@ -28,14 +28,6 @@
             }
           }
         }
-      }
-    }
-  },
-  "operations": {
-    "publishUserSignedup": {
-      "action": "send",
-      "channel": {
-        "$ref": "#/channels/userSignup"
       }
     }
   }

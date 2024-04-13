@@ -5,16 +5,18 @@ using System.Net.Http;
 using System.Net.Mime;
 using System.Reflection;
 using System.Text;
-using System.Text.Json;
 using System.Threading.Tasks;
 using CloudNative.CloudEvents;
 using CloudNative.CloudEvents.Kafka;
 using CloudNative.CloudEvents.SystemTextJson;
 using Confluent.Kafka;
+using DocumentsService.Converters;
 using DocumentsService.Tests.Setup;
 using FluentAssertions;
 using LEGO.AsyncAPI.Readers;
+using Newtonsoft.Json;
 using Xunit;
+using JsonSerializer = System.Text.Json.JsonSerializer;
 
 namespace DocumentsService.Tests;
 
@@ -22,7 +24,7 @@ public class KafkaProducerTests
 {
     [Theory]
     [DocumentsControllerSetup]
-    public async Task PushOrderToKafka(IConsumer<Null, string> consumer, IProducer<Null, string> producer, Document document)
+    public async Task PushOrderToKafka(IConsumer<string, byte[]> consumer, IProducer<string, byte[]> producer, Document document)
     {
         var assembly = Assembly.GetExecutingAssembly();
         var resourceName = assembly.GetManifestResourceNames().Single(s => s.EndsWith("Spec.json"));
@@ -38,7 +40,7 @@ public class KafkaProducerTests
                 Id = Guid.NewGuid().ToString(),
                 Source = new Uri("http://localhost"),
                 Time = DateTimeOffset.UtcNow,
-                DataContentType = MediaTypeNames.Text.Xml,
+                DataContentType = "application/cloudevents+json",
                 Data = JsonSerializer.Serialize(document),
                 Type = "com.example.myevent"
             };
@@ -46,17 +48,16 @@ public class KafkaProducerTests
             if (cloudEvent.IsValid)
             {
                 var kafkaMessage = cloudEvent.ToKafkaMessage(ContentMode.Structured, new JsonEventFormatter());
+                kafkaMessage.IsCloudEvent().Should().BeTrue();
 
-                var serializedKafkaMessage = JsonSerializer.Serialize(kafkaMessage);
-                var message = new Message<Null, string> { Value = serializedKafkaMessage };
-                await producer.ProduceAsync("orders", message);
+                await producer.ProduceAsync("orders", kafkaMessage);
 
                 var consumeResult = consumer.Consume(TimeSpan.FromSeconds(5));
-                var consumedOrder = JsonSerializer.Deserialize<Document>(consumeResult.Message.Value);
+                var consumedOrder = consumeResult.Message;
+                var cloudEventMsg = consumedOrder.ToCloudEvent(new JsonEventFormatter());
 
                 consumedOrder.Should().NotBeNull();
-
-                // consumedOrder.Should().BeEquivalentTo(document);
+                cloudEventMsg.IsValid.Should().BeTrue();
             }
         }
     }
