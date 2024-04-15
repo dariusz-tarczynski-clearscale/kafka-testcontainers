@@ -17,7 +17,7 @@ public class KafkaConsumerSetup : ICustomization
             AutoOffsetReset = AutoOffsetReset.Earliest
         };
 
-        var consumer = new ConsumerBuilder<string, byte[]>(config).Build();
+        var consumer = new ConsumerBuilder<string?, byte[]>(config).Build();
 
         consumer.Subscribe("orders");
 

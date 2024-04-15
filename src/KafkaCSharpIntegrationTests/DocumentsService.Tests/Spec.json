@@ -2,28 +2,70 @@
   "asyncapi": "2.3.0",
   "info": {
     "title": "Example application",
-    "version": "0.1.0"
+    "version": "0.1.0",
+    "license": {
+      "name": "apache"
+    }
   },
   "channels": {
-    "createOrder": {
-      "address": "order/new",
-      "messages": {
-        "newOrderMessage": {
-          "description": "Test message description.",
+    "user/signedup": {
+      "subscribe": {
+        "message": {
+          "description": "A message describing that a user just signed up.",
           "payload": {
-            "type": "object",
-            "additionalProperties": false,
+            "title": "MessageBody",
             "properties": {
-              "fullName": {
+              "specversion": {
+                "type": "string",
+                "examples": ["0.2"]
+              },
+              "schemaversion":  {
                 "type": "string"
               },
-              "email": {
+              "type":  {
                 "type": "string",
-                "format": "email"
+                "examples": [ "event-type" ]
               },
-              "age": {
-                "type": "integer",
-                "minimum": 18
+              "source":  {
+                "type": "string",
+                "examples": [ "http://localhost" ]
+              },
+              "subject":  {
+                "type": "string",
+                "examples": [ "event-subject" ]
+              },
+              "parent_trace":  {
+                "type": "string",
+              },
+              "id":  {
+                "type": "string",
+                "examples": [ "event-id" ]
+              },
+              "time":  {
+                "type": "string",
+                "examples": [ "event-date-time" ]
+              },
+              "datacontenttype": {
+                "type": "string",
+                "examples": [ "application/json" ]
+              },
+              "data": {
+                "type": "object",
+                "title": "MessageData",
+                "properties": {
+                  "fullName": {
+                    "type": "string",
+                    "examples": [ "event-data-name"]
+                  },
+                  "email": {
+                    "type": "string",
+                    "examples": [ "event-data-email"]
+                  },
+                  "age": {
+                    "type": "string",
+                    "examples": [ "20" ]
+                  }
+                }
               }
             }
           }
