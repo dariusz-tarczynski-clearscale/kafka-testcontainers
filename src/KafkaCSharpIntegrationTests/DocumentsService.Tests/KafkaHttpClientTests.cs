@@ -1,19 +1,11 @@
 ﻿using System;
-using System.IO;
-using System.Linq;
 using System.Net.Http;
-using System.Net.Mime;
-using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
-using CloudNative.CloudEvents;
-using CloudNative.CloudEvents.Kafka;
-using CloudNative.CloudEvents.SystemTextJson;
 using Confluent.Kafka;
 using DocumentsService.Tests.Setup;
 using FluentAssertions;
-using LEGO.AsyncAPI.Readers;
 using Xunit;
 
 namespace DocumentsService.Tests;

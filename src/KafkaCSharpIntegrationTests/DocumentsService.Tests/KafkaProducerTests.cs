@@ -2,17 +2,14 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Net.Http;
-using System.Net.Mime;
 using System.Reflection;
-using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using CloudNative.CloudEvents;
 using CloudNative.CloudEvents.Kafka;
 using CloudNative.CloudEvents.SystemTextJson;
 using Confluent.Kafka;
 using DocumentsService.Tests.Setup;
-using FluentAssertions;
 using LEGO.AsyncAPI.Models;
 using LEGO.AsyncAPI.Models.Interfaces;
 using LEGO.AsyncAPI.Readers;
@@ -20,7 +17,6 @@ using LEGO.AsyncAPI.Validations;
 using Newtonsoft.Json;
 using Xunit;
 using Xunit.Abstractions;
-using JsonSerializer = System.Text.Json.JsonSerializer;
 
 namespace DocumentsService.Tests;
 
@@ -33,127 +29,96 @@ internal class TestData
     public string Age { get; set; }
 }
 
-public class KafkaProducerTests
+public class KafkaProducerTests(ITestOutputHelper testOutputHelper)
 {
-    
-    private readonly ITestOutputHelper _testOutputHelper;
-
-    public KafkaProducerTests(ITestOutputHelper testOutputHelper)
-    {
-        _testOutputHelper = testOutputHelper;
-    }
-
     [Theory]
     [DocumentsControllerSetup]
     public async Task PushOrderToKafka(IConsumer<string?, byte[]> consumer, IProducer<string?, byte[]> producer, Document document)
     {
+        var schema = await GetAsyncApiSchema();
+        ValidateSchemaAndGetPropertiesExampleValues(schema, out var messageBodyValues, out var messageBodyDataValues);
+
+        var cloudEvent = new CloudEvent
+        {
+            Id = messageBodyValues["id"],
+            Source = new Uri(messageBodyValues["source"]),
+            Time = DateTimeOffset.UtcNow,
+            DataContentType = messageBodyValues["datacontenttype"],
+            Data = new TestData
+            {
+                FullName = messageBodyDataValues["fullName"],
+                Email = messageBodyDataValues["email"],
+                Age = messageBodyDataValues["age"]
+            },
+            Type = messageBodyValues["type"]
+        };
+        
+        Assert.True(cloudEvent.IsValid);
+        
+        var jsonFormatter = new JsonEventFormatter();
+        var kafkaMessage = cloudEvent.ToKafkaMessage(ContentMode.Structured, jsonFormatter);
+
+        await producer.ProduceAsync("orders", kafkaMessage);
+
+        var consumeResult = consumer.Consume(TimeSpan.FromSeconds(5));
+        var serialized = JsonConvert.SerializeObject(consumeResult.Message, new HeaderConverter());
+        var messageCopy = JsonConvert.DeserializeObject<Message<string?, byte[]>>(serialized, new HeadersConverter(), new HeaderConverter())!;
+        
+        Assert.True(messageCopy.IsCloudEvent());
+        var receivedCloudEvent = messageCopy.ToCloudEvent(jsonFormatter);
+
+        Assert.Equal(messageBodyValues["type"], receivedCloudEvent.Type);
+        Assert.Equal(new Uri(messageBodyValues["source"]), receivedCloudEvent.Source);
+        Assert.Equal(messageBodyValues["id"], receivedCloudEvent.Id);
+        Assert.Equal(messageBodyValues["datacontenttype"], receivedCloudEvent.DataContentType);
+        
+        var testDataJsonElement = Assert.IsType<JsonElement>(receivedCloudEvent.Data);
+        var testData = testDataJsonElement.Deserialize<TestData>();
+        Assert.NotNull(testData);
+        Assert.Equal(messageBodyDataValues["fullName"], testData.FullName);
+        Assert.Equal(messageBodyDataValues["email"], testData.Email);
+        Assert.Equal(messageBodyDataValues["age"], testData.Age);
+    }
+
+    private static async Task<string> GetAsyncApiSchema()
+    {
         var assembly = Assembly.GetExecutingAssembly();
         var resourceName = assembly.GetManifestResourceNames().Single(s => s.EndsWith("Spec.json"));
         var stream = assembly.GetManifestResourceStream(resourceName);
-        var kafkaSpec = await new StreamReader(stream).ReadToEndAsync();
-
+        return await new StreamReader(stream).ReadToEndAsync();
+    }
+    private void ValidateSchemaAndGetPropertiesExampleValues(string schema, out IDictionary<string, string> messageBodyValues, out IDictionary<string, string> messageBodyDataValues)
+    {
         var asyncApiReaderSettings = new AsyncApiReaderSettings();
-        asyncApiReaderSettings.RuleSet = new ValidationRuleSet();
         var properties = new Dictionary<string, string>();
         var dataProperties = new Dictionary<string, string>();
+        // The commented registration below doesn't work. The validation doesn't get triggered.
+        //asyncApiReaderSettings.RuleSet.Add(new ValidationRule<AsyncApiChannel>((context, item) =>
         asyncApiReaderSettings.RuleSet.Add(new ValidationRule<IAsyncApiExtensible>((context, item) =>
         {
             if (item is AsyncApiSchema { Title: "MessageBody" } bodyApiSchema)
             {
-                foreach (var property in bodyApiSchema.Properties)
-                {
-                    switch (property.Key)
-                    {
-                        case "specversion":
-                            OnSpecSchemaProperty(context, property, properties);
-                            break;
-                        case "id":
-                            OnSpecSchemaProperty(context, property, properties);
-                            break;
-                        case "subject":
-                            OnSpecSchemaProperty(context, property, properties);
-                            break;
-                        case "source":
-                            OnSpecSchemaProperty(context, property, properties);
-                            break;
-                        case "type":
-                            OnSpecSchemaProperty(context, property, properties);
-                            break;
-                        case "time":
-                            OnSpecSchemaProperty(context, property, properties);
-                            break;
-                        case "datacontenttype":
-                            OnSpecSchemaProperty(context, property, properties);
-                            break;
-                    }
-                }
+                WalkThroughTheMessageProperties(context, bodyApiSchema, properties);
             }
-
 
             if (item is not AsyncApiSchema { Title: "MessageData" } dataApiSchema) return;
             {
-                foreach (var property in dataApiSchema.Properties)
-                {
-                    switch (property.Key)
-                    {
-                        case "fullName":
-                            OnSpecSchemaProperty(context, property, dataProperties);
-                            break;
-                        case "email":
-                            OnSpecSchemaProperty(context, property, dataProperties);
-                            break;
-                        case "age":
-                            OnSpecSchemaProperty(context, property, dataProperties);
-                            break;
-                    }
-                }
+                WalkThroughTheMessageDataProperties(context, dataApiSchema, dataProperties);
             }
         }));
         
-        var asyncApiDocument = new AsyncApiStringReader(asyncApiReaderSettings).Read(kafkaSpec, out var diagnostic);
+        var asyncApiDocument = new AsyncApiStringReader(asyncApiReaderSettings).Read(schema, out var diagnostic);
 
         foreach (var diagnosticError in diagnostic.Errors)
         {
-            _testOutputHelper.WriteLine(diagnosticError.Message);
+            testOutputHelper.WriteLine(diagnosticError.Message);
         }
         Assert.Equal(0, diagnostic.Errors.Count);
 
-        var cloudEvent = new CloudEvent
-        {
-            Id = properties["id"],
-            Source = new Uri(properties["source"]),
-            Time = DateTimeOffset.UtcNow,
-            DataContentType = properties["datacontenttype"],
-            Data = new TestData
-            {
-                FullName = dataProperties["fullName"],
-                Email = dataProperties["email"],
-                Age = dataProperties["age"]
-            },
-            Type = properties["type"]
-        };
-        if (cloudEvent.IsValid)
-        {
-            var jsonFormatter = new JsonEventFormatter();
-            var kafkaMessage = cloudEvent.ToKafkaMessage(ContentMode.Structured, jsonFormatter);
-
-            await producer.ProduceAsync("orders", kafkaMessage);
-
-            var consumeResult = consumer.Consume(TimeSpan.FromSeconds(5));
-            var serialized = JsonConvert.SerializeObject(consumeResult.Message, new HeaderConverter());
-            var messageCopy = JsonConvert.DeserializeObject<Message<string?, byte[]>>(serialized, new HeadersConverter(), new HeaderConverter())!;
-            Assert.True(messageCopy.IsCloudEvent());
-            var receivedCloudEvent = messageCopy.ToCloudEvent(jsonFormatter);
-            
-
-            Assert.Equal(properties["type"], receivedCloudEvent.Type);
-            Assert.Equal(new Uri(properties["source"]), receivedCloudEvent.Source);
-            Assert.Equal(properties["id"], receivedCloudEvent.Id);
-            Assert.Equal(properties["datacontenttype"], receivedCloudEvent.DataContentType);
-        }
+        messageBodyValues = properties;
+        messageBodyDataValues = dataProperties;
     }
-    
-    private void OnSpecSchemaProperty(IValidationContext context, KeyValuePair<string, AsyncApiSchema> property, Dictionary<string, string> properties)
+    private static void OnSpecSchemaProperty(IValidationContext context, KeyValuePair<string, AsyncApiSchema> property, IDictionary<string, string> properties)
     {
         context.Enter("message");
         if (property.Value.Type != SchemaType.String)
@@ -166,7 +131,41 @@ public class KafkaProducerTests
         }
         context.Exit();
     }
+    private static void WalkThroughTheMessageProperties(IValidationContext context, AsyncApiSchema bodyApiSchema, IDictionary<string, string> exampleValues)
+    {
+        foreach (var property in bodyApiSchema.Properties)
+        {
+            switch (property.Key)
+            {
+                case "specversion":
+                case "id":
+                case "subject":
+                case "source":
+                case "type":
+                case "time":
+                case "datacontenttype":
+                    OnSpecSchemaProperty(context, property, exampleValues);
+                    break;
+            }
+        }
+    }
+    private static void WalkThroughTheMessageDataProperties(IValidationContext context, AsyncApiSchema dataApiSchema, IDictionary<string, string> dataExampleValues)
+    {
+        foreach (var property in dataApiSchema.Properties)
+        {
+            switch (property.Key)
+            {
+                case "fullName":
+                case "email":
+                case "age":
+                    OnSpecSchemaProperty(context, property, dataExampleValues);
+                    break;
+            }
+        }
+    }
+ 
 }
+
 public class HeadersConverter : JsonConverter
 {
     public override bool CanConvert(Type objectType)
