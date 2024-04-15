@@ -15,7 +15,7 @@ public class KafkaHttpClientTests
 
     [Theory]
     [DocumentsControllerSetup]
-    public async Task PushOrderToKafka(HttpClient client, IConsumer<Null, string> consumer, Document document)
+    public async Task PushOrderToKafka(HttpClient client, IConsumer<string, byte[]> consumer, Document document)
     {
         var response = await client.PostAsync("/api/documents",
             new StringContent(JsonSerializer.Serialize(document), Encoding.UTF8, "application/json"));
