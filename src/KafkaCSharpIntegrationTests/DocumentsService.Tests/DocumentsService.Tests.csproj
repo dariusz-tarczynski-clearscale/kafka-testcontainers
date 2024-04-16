@@ -33,6 +33,9 @@
 
     <ItemGroup>
       <None Remove="Spec.json" />
+      <EmbeddedResource Include="AllInOneSpec.json">
+        <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      </EmbeddedResource>
       <EmbeddedResource Include="Spec.json">
         <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       </EmbeddedResource>

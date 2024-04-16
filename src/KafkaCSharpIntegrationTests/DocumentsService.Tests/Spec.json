@@ -1,74 +1,56 @@
 {
-  "asyncapi": "2.3.0",
+  "asyncapi": "2.6.0",
   "info": {
-    "title": "Example application",
-    "version": "0.1.0",
-    "license": {
-      "name": "apache"
-    }
+    "title": "Account Service CloudEvents - structured",
+    "version": "1.0.0",
+    "description": "Processes user sign ups and publishes an event afterwards"
   },
   "channels": {
     "user/signedup": {
-      "subscribe": {
+      "publish": {
         "message": {
-          "description": "A message describing that a user just signed up.",
-          "payload": {
-            "title": "MessageBody",
-            "properties": {
-              "specversion": {
-                "type": "string",
-                "examples": ["0.2"]
-              },
-              "schemaversion":  {
-                "type": "string"
-              },
-              "type":  {
-                "type": "string",
-                "examples": [ "event-type" ]
-              },
-              "source":  {
-                "type": "string",
-                "examples": [ "http://localhost" ]
-              },
-              "subject":  {
-                "type": "string",
-                "examples": [ "event-subject" ]
-              },
-              "parent_trace":  {
-                "type": "string",
-              },
-              "id":  {
-                "type": "string",
-                "examples": [ "event-id" ]
-              },
-              "time":  {
-                "type": "string",
-                "examples": [ "event-date-time" ]
-              },
-              "datacontenttype": {
-                "type": "string",
-                "examples": [ "application/json" ]
-              },
-              "data": {
-                "type": "object",
-                "title": "MessageData",
-                "properties": {
-                  "fullName": {
-                    "type": "string",
-                    "examples": [ "event-data-name"]
-                  },
-                  "email": {
-                    "type": "string",
-                    "examples": [ "event-data-email"]
-                  },
-                  "age": {
-                    "type": "string",
-                    "examples": [ "20" ]
-                  }
-                }
-              }
-            }
+          "$ref": "#/components/messages/message"
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "messagePayload": {
+        "type": "object",
+        "allOf": [
+          {
+            "$ref": "https://raw.githubusercontent.com/cloudevents/spec/v1.0.1/spec.json"
           }
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/messageData"
+          }
+        }
+      },
+      "messageData": {
+        "type": "object",
+        "properties": {
+          "fullName": {
+            "description": "Name of the user",
+            "type": "string"
+          },
+          "email": {
+            "format": "email",
+            "description": "Email of the user",
+            "type": "string"
+          }
+        }
+      }
+    },
+    "messages": {
+      "message": {
+        "name": "message",
+        "title": "User signed up message",
+        "summary": "Emitted when a user signs up",
+        "payload": {
+          "$ref": "#/components/schemas/messagePayload"
         }
       }
     }

@@ -83,7 +83,7 @@ public class KafkaProducerTests(ITestOutputHelper testOutputHelper)
     private static async Task<string> GetAsyncApiSchema()
     {
         var assembly = Assembly.GetExecutingAssembly();
-        var resourceName = assembly.GetManifestResourceNames().Single(s => s.EndsWith("Spec.json"));
+        var resourceName = assembly.GetManifestResourceNames().Single(s => s.EndsWith("AllInOneSpec.json"));
         var stream = assembly.GetManifestResourceStream(resourceName);
         return await new StreamReader(stream).ReadToEndAsync();
     }
