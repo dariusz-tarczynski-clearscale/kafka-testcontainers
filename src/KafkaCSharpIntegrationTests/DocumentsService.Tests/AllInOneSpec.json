@@ -86,7 +86,7 @@
           },
           "age": {
             "type": "string",
-            "examples": [ "20" ],
+            "examples": [ "20" ]
           }
         }
       }
