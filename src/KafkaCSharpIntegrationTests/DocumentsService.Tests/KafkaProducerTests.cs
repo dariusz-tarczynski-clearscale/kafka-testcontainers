@@ -1,8 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Reflection;
+using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using CloudNative.CloudEvents;
@@ -15,6 +18,8 @@ using LEGO.AsyncAPI.Models.Interfaces;
 using LEGO.AsyncAPI.Readers;
 using LEGO.AsyncAPI.Validations;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using Newtonsoft.Json.Schema;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -31,11 +36,13 @@ internal class TestData
 
 public class KafkaProducerTests(ITestOutputHelper testOutputHelper)
 {
+    private static readonly HttpClient Client = new (); 
+    
     [Theory]
     [DocumentsControllerSetup]
-    public async Task PushOrderToKafka(IConsumer<string?, byte[]> consumer, IProducer<string?, byte[]> producer, Document document)
+    public async Task PushObjectToKafka_AllInOneAsyncApiSpec(IConsumer<string?, byte[]> consumer, IProducer<string?, byte[]> producer, Document document)
     {
-        var schema = await GetAsyncApiSchema();
+        var schema = await GetAsyncApiSchema("AllInOneSpec.json");
         ValidateSchemaAndGetPropertiesExampleValues(schema, out var messageBodyValues, out var messageBodyDataValues);
 
         var cloudEvent = new CloudEvent
@@ -61,11 +68,9 @@ public class KafkaProducerTests(ITestOutputHelper testOutputHelper)
         await producer.ProduceAsync("orders", kafkaMessage);
 
         var consumeResult = consumer.Consume(TimeSpan.FromSeconds(5));
-        var serialized = JsonConvert.SerializeObject(consumeResult.Message, new HeaderConverter());
-        var messageCopy = JsonConvert.DeserializeObject<Message<string?, byte[]>>(serialized, new HeadersConverter(), new HeaderConverter())!;
         
-        Assert.True(messageCopy.IsCloudEvent());
-        var receivedCloudEvent = messageCopy.ToCloudEvent(jsonFormatter);
+        Assert.True(consumeResult.Message.IsCloudEvent());
+        var receivedCloudEvent = consumeResult.Message.ToCloudEvent(jsonFormatter);
 
         Assert.Equal(messageBodyValues["type"], receivedCloudEvent.Type);
         Assert.Equal(new Uri(messageBodyValues["source"]), receivedCloudEvent.Source);
@@ -80,14 +85,80 @@ public class KafkaProducerTests(ITestOutputHelper testOutputHelper)
         Assert.Equal(messageBodyDataValues["age"], testData.Age);
     }
 
-    private static async Task<string> GetAsyncApiSchema()
+    
+    [Theory]
+    [DocumentsControllerSetup]
+    public async Task PushObjectToKafka_AsyncApiWithExternalReference(IConsumer<string?, byte[]> consumer, IProducer<string?, byte[]> producer, Document document)
+    {
+        var schema = await GetAsyncApiSchema("ExternallyReferencedSchemaSpec.json");
+        var externalReference = ValidateSchemaAndGetPropertiesExampleValues(schema, out var messageBodyValues, out var messageBodyDataValues);
+
+        var cloudEvent = new CloudEvent
+        {
+            Id = "default-id",
+            Source = new Uri("http://localhost"),
+            Time = DateTimeOffset.UtcNow,
+            DataContentType ="application/json",
+            Data = new TestData
+            {
+                FullName = "fullName",
+                Email = "email",
+                Age = "age"
+            },
+            Type ="default-type"
+        };
+        
+        Assert.True(cloudEvent.IsValid);
+        
+        var jsonFormatter = new JsonEventFormatter();
+        var kafkaMessage = cloudEvent.ToKafkaMessage(ContentMode.Structured, jsonFormatter);
+
+        await producer.ProduceAsync("orders", kafkaMessage);
+
+        var consumeResult = consumer.Consume(TimeSpan.FromSeconds(5));
+        
+        Assert.True(consumeResult.Message.IsCloudEvent());
+        var receivedCloudEvent = consumeResult.Message.ToCloudEvent(jsonFormatter);
+        var schemaStr = await GetExternalJsonSchema(externalReference);
+
+        var externalSchema = JSchema.Load(new JsonTextReader(new StringReader(schemaStr)));
+
+        var kafkaMessageString = Encoding.UTF8.GetString(consumeResult.Message.Value);
+        var isValidEvent = JObject.Parse(kafkaMessageString).IsValid(externalSchema);
+        Assert.True(isValidEvent);
+
+        var testDataJsonElement = Assert.IsType<JsonElement>(receivedCloudEvent.Data);
+        var testData = testDataJsonElement.Deserialize<TestData>();
+        Assert.NotNull(testData);
+        Assert.Equal("fullName", testData.FullName);
+        Assert.Equal("email", testData.Email);
+        Assert.Equal("age", testData.Age);
+    }
+
+    private static async Task<string> GetExternalJsonSchema(string url)
+    {
+        try
+        {
+            HttpResponseMessage response = await Client.GetAsync(url);
+            response.EnsureSuccessStatusCode();
+            string responseBody = await response.Content.ReadAsStringAsync();
+            return responseBody;
+        }
+        catch (HttpRequestException e)
+        {
+            Console.WriteLine("\nException Caught!");
+            Console.WriteLine("Message :{0} ", e.Message);
+            return null;
+        } 
+    }
+    private static async Task<string> GetAsyncApiSchema(string schemaFileName)
     {
         var assembly = Assembly.GetExecutingAssembly();
-        var resourceName = assembly.GetManifestResourceNames().Single(s => s.EndsWith("AllInOneSpec.json"));
+        var resourceName = assembly.GetManifestResourceNames().Single(s => s.EndsWith(schemaFileName));
         var stream = assembly.GetManifestResourceStream(resourceName);
         return await new StreamReader(stream).ReadToEndAsync();
     }
-    private void ValidateSchemaAndGetPropertiesExampleValues(string schema, out IDictionary<string, string> messageBodyValues, out IDictionary<string, string> messageBodyDataValues)
+    private string? ValidateSchemaAndGetPropertiesExampleValues(string schema, out IDictionary<string, string> messageBodyValues, out IDictionary<string, string> messageBodyDataValues)
     {
         var asyncApiReaderSettings = new AsyncApiReaderSettings();
         var properties = new Dictionary<string, string>();
@@ -108,7 +179,9 @@ public class KafkaProducerTests(ITestOutputHelper testOutputHelper)
         }));
         
         var asyncApiDocument = new AsyncApiStringReader(asyncApiReaderSettings).Read(schema, out var diagnostic);
-
+        asyncApiDocument.ResolveReferences();
+        var asyncApiDocExternalReference = asyncApiDocument?.Components?.Schemas?["messagePayload"].AllOf[0]?.Reference?.ExternalResource;
+        
         foreach (var diagnosticError in diagnostic.Errors)
         {
             testOutputHelper.WriteLine(diagnosticError.Message);
@@ -117,6 +190,8 @@ public class KafkaProducerTests(ITestOutputHelper testOutputHelper)
 
         messageBodyValues = properties;
         messageBodyDataValues = dataProperties;
+
+        return asyncApiDocExternalReference;
     }
     private static void OnSpecSchemaProperty(IValidationContext context, KeyValuePair<string, AsyncApiSchema> property, IDictionary<string, string> properties)
     {
@@ -164,63 +239,4 @@ public class KafkaProducerTests(ITestOutputHelper testOutputHelper)
         }
     }
  
-}
-
-public class HeadersConverter : JsonConverter
-{
-    public override bool CanConvert(Type objectType)
-    {
-        return objectType == typeof(Headers);
-    }
-
-    public override object ReadJson(JsonReader reader, Type objectType, object existingValue, Newtonsoft.Json.JsonSerializer serializer)
-    {
-        if (reader.TokenType == JsonToken.Null)
-        {
-            return null;
-        }
-        else
-        {
-            var surrogate = serializer.Deserialize<List<Header>>(reader)!;
-            var headers = new Headers();
-
-            foreach (var header in surrogate)
-            {
-                headers.Add(header.Key, header.GetValueBytes());
-            }
-            return headers;
-        }
-    }
-
-    public override void WriteJson(JsonWriter writer, object value, Newtonsoft.Json.JsonSerializer serializer)
-    {
-        throw new NotImplementedException();
-    }
-}
-
-public class HeaderConverter : JsonConverter
-{
-    private class HeaderContainer
-    {
-        public string? Key { get; set; }
-        public byte[]? Value { get; set; }
-    }
-
-    public override bool CanConvert(Type objectType)
-    {
-        return objectType == typeof(Header) || objectType == typeof(IHeader);
-    }
-
-    public override object ReadJson(JsonReader reader, Type objectType, object existingValue, Newtonsoft.Json.JsonSerializer serializer)
-    {
-        var headerContainer = serializer.Deserialize<HeaderContainer>(reader)!;
-        return new Header(headerContainer.Key, headerContainer.Value);
-    }
-
-    public override void WriteJson(JsonWriter writer, object value, Newtonsoft.Json.JsonSerializer serializer)
-    {
-        var header = (IHeader) value!;
-        var container = new HeaderContainer { Key = header.Key, Value = header.GetValueBytes() };
-        serializer.Serialize(writer, container);
-    }
 }
