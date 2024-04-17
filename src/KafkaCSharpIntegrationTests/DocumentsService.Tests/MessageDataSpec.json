@@ -1,0 +1,15 @@
+{
+  "required": [ "FullName", "Email" ],
+  "type": "object",
+  "properties": {
+    "FullName": {
+      "description": "Name of the user",
+      "type": "string"
+    },
+    "Email": {
+      "format": "email",
+      "description": "Email of the user",
+      "type": "string"
+    }
+  }
+}

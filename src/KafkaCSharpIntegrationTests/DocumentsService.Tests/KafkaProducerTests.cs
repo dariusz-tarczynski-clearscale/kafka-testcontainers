@@ -91,8 +91,8 @@ public class KafkaProducerTests(ITestOutputHelper testOutputHelper)
     public async Task PushObjectToKafka_AsyncApiWithExternalReference(IConsumer<string?, byte[]> consumer, IProducer<string?, byte[]> producer, Document document)
     {
         var schema = await GetAsyncApiSchema("ExternallyReferencedSchemaSpec.json");
-        var externalReference = ValidateSchemaAndGetPropertiesExampleValues(schema, out var messageBodyValues, out var messageBodyDataValues);
-
+        var asyncApiDocument = ValidateSchemaAndGetPropertiesExampleValues(schema, out var messageBodyValues, out var messageBodyDataValues);
+        
         var cloudEvent = new CloudEvent
         {
             Id = "default-id",
@@ -102,7 +102,7 @@ public class KafkaProducerTests(ITestOutputHelper testOutputHelper)
             Data = new TestData
             {
                 FullName = "fullName",
-                Email = "email",
+                Email = "email@test.com",
                 Age = "age"
             },
             Type ="default-type"
@@ -119,9 +119,9 @@ public class KafkaProducerTests(ITestOutputHelper testOutputHelper)
         
         Assert.True(consumeResult.Message.IsCloudEvent());
         var receivedCloudEvent = consumeResult.Message.ToCloudEvent(jsonFormatter);
-        var schemaStr = await GetExternalJsonSchema(externalReference);
+        var externalSchemaContent = await GetExternalJsonSchema(GetAsyncExternalReference(asyncApiDocument));
 
-        var externalSchema = JSchema.Load(new JsonTextReader(new StringReader(schemaStr)));
+        var externalSchema = JSchema.Load(new JsonTextReader(new StringReader(externalSchemaContent)));
 
         var kafkaMessageString = Encoding.UTF8.GetString(consumeResult.Message.Value);
         var isValidEvent = JObject.Parse(kafkaMessageString).IsValid(externalSchema);
@@ -130,9 +130,14 @@ public class KafkaProducerTests(ITestOutputHelper testOutputHelper)
         var testDataJsonElement = Assert.IsType<JsonElement>(receivedCloudEvent.Data);
         var testData = testDataJsonElement.Deserialize<TestData>();
         Assert.NotNull(testData);
-        Assert.Equal("fullName", testData.FullName);
-        Assert.Equal("email", testData.Email);
-        Assert.Equal("age", testData.Age);
+        
+        var localFileSchemaLocation = GetLocalFileMessageDataSchema(asyncApiDocument);
+        var localFileSchemaContent = await GetAsyncApiSchema(localFileSchemaLocation);
+        
+        var localFileSchema = JSchema.Load(new JsonTextReader(new StringReader(localFileSchemaContent)));
+        var isValidData = JObject.FromObject(testData).IsValid(localFileSchema);
+        
+        Assert.True(isValidData);
     }
 
     private static async Task<string> GetExternalJsonSchema(string url)
@@ -158,7 +163,19 @@ public class KafkaProducerTests(ITestOutputHelper testOutputHelper)
         var stream = assembly.GetManifestResourceStream(resourceName);
         return await new StreamReader(stream).ReadToEndAsync();
     }
-    private string? ValidateSchemaAndGetPropertiesExampleValues(string schema, out IDictionary<string, string> messageBodyValues, out IDictionary<string, string> messageBodyDataValues)
+
+    private static string GetLocalFileMessageDataSchema(AsyncApiDocument asyncApiDocument)
+    {
+        return asyncApiDocument?.Components?.Schemas?["messagePayload"].Properties["data"].Reference.Reference;
+    }
+    
+    private static string GetAsyncExternalReference(AsyncApiDocument asyncApiDocument)
+    {
+        return asyncApiDocument?.Components?.Schemas?["messagePayload"].AllOf[0]?.Reference?.ExternalResource;
+    }
+
+    private AsyncApiDocument ValidateSchemaAndGetPropertiesExampleValues(string schema,
+        out IDictionary<string, string> messageBodyValues, out IDictionary<string, string> messageBodyDataValues)
     {
         var asyncApiReaderSettings = new AsyncApiReaderSettings();
         var properties = new Dictionary<string, string>();
@@ -177,22 +194,23 @@ public class KafkaProducerTests(ITestOutputHelper testOutputHelper)
                 WalkThroughTheMessageDataProperties(context, dataApiSchema, dataProperties);
             }
         }));
-        
+
         var asyncApiDocument = new AsyncApiStringReader(asyncApiReaderSettings).Read(schema, out var diagnostic);
         asyncApiDocument.ResolveReferences();
-        var asyncApiDocExternalReference = asyncApiDocument?.Components?.Schemas?["messagePayload"].AllOf[0]?.Reference?.ExternalResource;
-        
+
         foreach (var diagnosticError in diagnostic.Errors)
         {
             testOutputHelper.WriteLine(diagnosticError.Message);
         }
+
         Assert.Equal(0, diagnostic.Errors.Count);
 
         messageBodyValues = properties;
         messageBodyDataValues = dataProperties;
-
-        return asyncApiDocExternalReference;
+        
+        return asyncApiDocument;
     }
+
     private static void OnSpecSchemaProperty(IValidationContext context, KeyValuePair<string, AsyncApiSchema> property, IDictionary<string, string> properties)
     {
         context.Enter("message");

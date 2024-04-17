@@ -25,21 +25,7 @@
         ],
         "properties": {
           "data": {
-            "$ref": "#/components/schemas/messageData"
-          }
-        }
-      },
-      "messageData": {
-        "type": "object",
-        "properties": {
-          "fullName": {
-            "description": "Name of the user",
-            "type": "string"
-          },
-          "email": {
-            "format": "email",
-            "description": "Email of the user",
-            "type": "string"
+            "$ref": "MessageDataSpec.json"
           }
         }
       }

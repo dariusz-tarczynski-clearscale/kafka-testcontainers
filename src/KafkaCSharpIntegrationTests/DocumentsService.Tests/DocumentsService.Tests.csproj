@@ -40,6 +40,8 @@
         <EmbeddedResource Include="ExternallyReferencedSchemaSpec.json">
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </EmbeddedResource>
+        <EmbeddedResource Include="MessageDataSpec.json">
+            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </EmbeddedResource>
     </ItemGroup>
-
 </Project>
